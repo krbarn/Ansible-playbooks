@@ -1,0 +1,29 @@
+---
+- hosts: all
+  tasks:
+  - name: install net-snmp
+    yum:
+       name: net-snmp 
+       state: present
+       disable_gpg_check: yes
+
+  - name: setup Dell hardware depo
+    raw: wget -q -O - http://linux.dell.com/repo/hardware/latest/bootstrap.cgi | bash
+
+  - name: Install omsa agent
+    yum:
+       name: srvadmin-all
+       state: present
+       disable_gpg_check: yes
+
+  - name: enabling net-snmpd
+    service: name=snmpd enabled=yes
+
+  - name: starting snmpd
+    service: name=snmpd state=started
+
+  - name: enabling OMSA processes
+    raw: /opt/dell/srvadmin/sbin/srvadmin-services.sh enable
+
+  - name: starting OMSA processes
+    raw: /opt/dell/srvadmin/sbin/srvadmin-services.sh start

@@ -1,0 +1,47 @@
+---
+- hosts: all
+  remote_user: root
+  tasks:
+  - name: Sanity Check
+    assert:
+      that:
+        - "ansible_os_family == 'RedHat' or
+           ansible_os_family == 'Debian'"
+
+  - name: Install Required Packages
+    package:
+      name: "{{item}}"
+      state: present
+    with_items:
+      - autofs
+      - nfs-utils
+
+  - name: Copy auto.master
+    copy:
+       src: files/auto.master
+       dest: /etc/auto.master
+       owner: root
+       group: root
+       mode: 0644
+
+  - name: Copy auto.r
+    copy:
+       src: files/auto.r
+       dest: /etc/auto.r
+       owner: root
+       group: root
+       mode: 0755
+
+  - name: Copy auto.u
+    copy:
+       src: files/auto.u
+       dest: /etc/auto.u
+       owner: root
+       group: root
+       mode: 0755
+
+  - name: Enable and Start autofs
+    service:
+      name: autofs
+      state: started
+      enabled: yes

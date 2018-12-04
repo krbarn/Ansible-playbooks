@@ -1,0 +1,103 @@
+---
+- hosts: all
+  remote_user: root
+  vars:
+    cmk_server: osimon01.unx.sas.com
+    cmk_site: osiopen
+  tasks:
+    - name: Sanity Check
+      assert:
+        that:
+          - "ansible_os_family == 'RedHat' or
+             ansible_os_family == 'Debian'"
+
+    - name: "Install xinetd"
+      when: ansible_os_family != "RedHat" or
+            ansible_distribution_major_version|int < 7
+      package:
+        name: xinetd
+        state: present
+
+    - name: copy check-mk-agent rpm to /tmp
+      when: ansible_os_family == "RedHat"
+      copy:
+        src: files/check-mk-agent-1.4.0p24-1.noarch.rpm
+        dest: /tmp/check-mk-agent-1.4.0p24-1.noarch.rpm
+        owner: root
+        group: root
+        mode: 0440
+
+    - name: copy check-mk-agent deb to /tmp
+      when: ansible_os_family == "Debian"
+      copy:
+        src: files/check-mk-agent-1.4.0p24-1.noarch.deb
+        dest: /tmp/check-mk-agent-1.4.0p24-1.noarch.deb
+        owner: root
+        group: root
+        mode: 0440
+
+    - name: "Install Check_MK Agent (RedHat)"
+      when: ansible_os_family == "RedHat"
+      yum:
+        name: /tmp/check-mk-agent-1.4.0p24-1.noarch.rpm
+        state: present
+      register: "agent_RedHat"
+
+    - name: "Install Check_MK Agent (Debian)"
+      when: ansible_os_family == "Debian"
+      apt:
+        deb: /tmp/check-mk-agent_1.4.0p24-1_all.deb
+        state: present
+      register: "agent_Debian"
+
+    - name: "Start/Enable xinetd (Serve CMK)"
+      when: ansible_os_family != "RedHat" or
+            ansible_distribution_major_version|int < 7
+      service:
+        name: xinetd
+        state: started
+        enabled: yes
+
+    - name: Check CMK Server Registration
+      uri:
+        url: "http://{{ cmk_server }}/{{ cmk_site }}/check_mk/webapi.py?action=get_host&_username=automation&_secret=0e3f1baf-0112-4988-a4b5-7f0e9bc09265"
+        method: POST
+        body: "request={\"hostname\":\"{{ ansible_fqdn }}\"}"
+        return_content: yes
+      register: cmk_check
+
+    - name: Register with CMK Server
+      when: cmk_check.json is defined and cmk_check.json.result_code|int != 0
+      uri:
+        url: "http://{{ cmk_server }}/{{ cmk_site }}/check_mk/webapi.py?action=add_host&_username=automation&_secret=0e3f1baf-0112-4988-a4b5-7f0e9bc09265"
+        method: POST
+        body: "request={\"attributes\":{ \"tag_agent\": \"cmk-agent\" }, \"hostname\":\"{{ ansible_fqdn }}\",\"folder\":\"linux\"}"
+      register: cmk_registration
+      changed_when: true
+
+    - name: Discover Services for CMK Server
+      when: agent_{{ ansible_os_family }}.changed or cmk_registration.changed
+      uri:
+        url: "http://{{ cmk_server }}/{{ cmk_site }}/check_mk/webapi.py?action=discover_services&_username=automation&_secret=0e3f1baf-0112-4988-a4b5-7f0e9bc09265"
+        method: POST
+        body: "request={\"hostname\":\"{{ ansible_fqdn }}\"}"
+      register: cmk_discovery
+      changed_when: true
+
+    - name: Choose Activator
+      set_fact:
+        activator: "{{ item }}"
+      with_items: "{{ ansible_play_batch }}"
+      when: activator is undefined and
+            (hostvars[item].cmk_registration.changed or
+            hostvars[item].cmk_discovery.changed)
+      run_once: true
+
+    - name: Activate CMK Server Changes
+      when: activator is defined and
+            inventory_hostname == activator
+      uri:
+        url: "http://{{ cmk_server }}/{{ cmk_site }}/check_mk/webapi.py?action=activate_changes&_username=automation&_secret=0e3f1baf-0112-4988-a4b5-7f0e9bc09265"
+        method: POST
+        body: "request={\"sites\":[\"{{ cmk_site }}\"],\"allow_foreign_changes\":\"0\"}"
+      changed_when: true

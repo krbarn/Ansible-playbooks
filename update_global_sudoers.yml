@@ -1,0 +1,19 @@
+---
+#
+# overwrite the sudoers file on the system using the global sudoers files on this server
+#
+- hosts: all
+  tasks:
+  - name: Sanity Check
+    assert:
+      that:
+        - ansible_os_family == 'RedHat' 
+        - ansible_distribution_major_version|int >= 7
+  - name: copy /etc/sudoers
+    copy:
+      src: /local/etc/sudoers_config/sudoers 
+      dest: /etc/sudoers
+      owner: root
+      group: root
+      mode: 0440
+      backup: yes
