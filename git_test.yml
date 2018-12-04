@@ -1,0 +1,7 @@
+---
+- hosts: all
+  tasks:
+  - name: get files from a git project
+    git:
+      repo: 'https://gitlab.sas.com/ken.barnhouse/ansible.git'
+      dest: /tmp/test
