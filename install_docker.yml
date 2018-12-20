@@ -1,0 +1,83 @@
+#
+# playbook: install_docker.yum
+# description:  This playbook will setup a disk for the overlay2 file system
+# for docker, the install docker and
+#
+
+---
+- hosts: all
+  remote_user: root
+  vars:
+    disk_device: sdb
+    vg_name: docker_data
+    lv_name: data
+  tasks:
+
+  - name: Sanity Checks
+    assert:
+        that: ansible_os_family == 'Redhat'
+
+  - name: check if disk drive {{ disk_device }} exists if so run block
+    stat:
+      path: /dev/{{ disk_device }}
+    register: stat_result
+
+# this block will configure second disk if available for docker storage
+# it will partition the disk, create a volume group and logical volume and
+# and create an XFS file system on the logical volume
+
+  - block:
+    - parted:
+        device: /dev/{{ disk_device }}
+        number: 1
+        state: present
+    - lvg:
+        vg: {{ vg_name }}
+        pvs: /dev/{{ disk_device }}
+    - lvol:
+        vg: {{ vg_name }}
+        lv: {{ lv_name }}
+        size: 100%FREE
+    - filesystem:
+        fstype: xfs
+        device: /dev/{{ vg_name }}/{{ lv_name }}
+        opts: ftype=1
+    - mount:
+        path: /var/lib/docker
+        src: /dev/{{ vg_name }}/{{ lv_name }}
+        state: mounted
+        fstype: xfs
+    when: stat_result.stat.exists == True
+
+  - name: Install required pkgs
+    yum:
+      name: "{{ item }}"
+      state: latest
+      with_items:
+        - yum-utils
+        - device-mapper-persistent-data
+        - lvm2
+
+  - name: Add Docker repo
+    get_url:
+      url: https://download.docker.com/linux/centos/docker-ce.repo
+      dest: /etc/yum.repos.d/docer-ce.repo
+
+  - name: Enable Docker Edge & Test repo
+    ini_file:
+     dest: /etc/yum.repos.d/docer-ce.repo
+     section: "{{ item }}"
+     option: enabled
+     value: 0
+     with_items: ['docker-ce-test', 'docker-ce-edge']
+
+  - name: Install Docker
+    yum:
+      name: docker-ce
+      state: latest
+
+  - name: Start Docker service
+    service:
+      name: docker
+      state: started
+      enabled: yes
